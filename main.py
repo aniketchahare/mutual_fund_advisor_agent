@@ -1,7 +1,7 @@
 import asyncio
 
 # Import the main customer service agent
-from mutual_fund_advisor_agent.agent import mutual_fund_advisor_agent
+from mutual_fund_advisor_agent.agent import root_agent
 from dotenv import load_dotenv
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -50,7 +50,7 @@ async def main_async():
     # ===== PART 4: Agent Runner Setup =====
     # Create a runner with the main customer service agent
     runner = Runner(
-        agent=mutual_fund_advisor_agent,
+        agent=root_agent,
         app_name=APP_NAME,
         session_service=session_service,
     )
