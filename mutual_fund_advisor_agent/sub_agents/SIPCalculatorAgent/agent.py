@@ -63,6 +63,9 @@ sip_calculator_agent = LlmAgent(
         - Calculate the SIP Future Value using the formula provided.
         - Round the future value to the nearest hundred for readability.
         - If the user wants to compare the future value against inflation, ask for the inflation rate and use the formula provided to calculate the future value.
+        - Keep the conversation going, ask for futher queries until the user is satisfied with the result.
+        - If the user satisfies with the result, then ask for the final confirmation to proceed with the investment to buy.
+        - If user responds with positive response, then transfer the conversation to the fundRecommenderAgent where it left the conversation.
     """,
     output_key="sip_calculator_output",
 )

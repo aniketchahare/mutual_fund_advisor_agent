@@ -33,6 +33,9 @@ goal_planner_agent = LlmAgent(
             - Child’s Education → Equity Fund (8+ years)
             - Wealth Creation → Flexi-cap / Small-cap (10+ years)
             - House Purchase → Debt/Hybrid (3–5 years)
+
+    Note:
+    - Once the user has provided the information, then transfer the conversation to the fundRecommenderAgent.
     """,
     output_key="investment_goals",
 )

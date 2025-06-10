@@ -38,6 +38,7 @@ user_profile_agent = LlmAgent(
    - If the user doesn't want to share certain information, respect their privacy.
    - Validate the user's responses to ensure they are valid.
    - If the user's response is not valid, ask them to clarify or provide a different answer.
+   - Keep the conversation going, once the user has provided the information, then transfer the conversation to the investor_classifier_agent.
     """,
     output_key="user_profile",
 )

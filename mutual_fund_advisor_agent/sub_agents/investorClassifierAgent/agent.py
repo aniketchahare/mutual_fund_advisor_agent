@@ -36,6 +36,7 @@ investor_classifier_agent = LlmAgent(
    - If the user doesn't want to share certain information, respect their privacy.
    - Validate the user's responses to ensure they are valid.
    - If the user's response is not valid, ask them to clarify or provide a different answer.
+   - Once the investor type is classified, then transfer the conversation to the goal_planner_agent.
     """,
     output_key="investor_type",
 )
