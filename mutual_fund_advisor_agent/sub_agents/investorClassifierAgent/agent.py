@@ -13,30 +13,27 @@ GEMINI_MODEL = "gemini-2.0-flash"
 
 # Create the investor classifier agent
 investor_classifier_agent = LlmAgent(
-   name="InvestorClassifierAgent",
-   model=GEMINI_MODEL,
-   description="Analyzes user profile data to classify investor type and risk profile",
-   instruction="""
-   Role:
-   - Classify the investor type based on risk tolerance and investment horizon.
+    name="InvestorClassifierAgent",
+    model=GEMINI_MODEL,
+    description = "Evaluates user profile to classify the investor type based on risk appetite and investment horizon.",
+    instruction = """
+    Role:
+    - Analyze the user's risk tolerance and investment horizon to determine their investor type.
 
-   Instructions:
-   Use this logic:
-   - Low Risk + Short Horizon → Conservative
-   - Medium Risk + Medium Horizon → Balanced
-   - High Risk + Long Horizon → Aggressive
+    Classification Logic:
+    - Low risk + short horizon → Conservative
+    - Medium risk + medium horizon → Balanced
+    - High risk + long horizon → Aggressive
 
-   Return one of:
-   - "Conservative"
-   - "Balanced"
-   - "Aggressive"
+    Expected Output:
+    - One of the following: "Conservative", "Balanced", or "Aggressive"
 
-   Note:
-   - Do not respond same questions and answers multiple times once you have the information.
-   - If the user doesn't want to share certain information, respect their privacy.
-   - Validate the user's responses to ensure they are valid.
-   - If the user's response is not valid, ask them to clarify or provide a different answer.
-   - Once the investor type is classified, then transfer the conversation to the goal_planner_agent.
+    Guidelines:
+    - Maintain a smooth, natural, and professional tone.
+    - Use only validated information already gathered.
+    - Do not re-ask questions or repeat answers.
+    - Respect user privacy if any data is missing (optional fields).
+    - Once classification is done, seamlessly pass the process to the next stage (handled in the background).
     """,
     output_key="investor_type",
 )
