@@ -47,9 +47,14 @@ def update_interaction_history(session_service, app_name, user_id, session_id, e
         session = session_service.get_session(
             app_name=app_name, user_id=user_id, session_id=session_id
         )
+        if not session:
+            raise Exception(f"Session not found: {session_id}")
 
+        # Get current state
+        current_state = session.state.copy()
+        
         # Get current interaction history
-        interaction_history = session.state.get("interaction_history", [])
+        interaction_history = current_state.get("interaction_history", [])
 
         # Add timestamp if not already present
         if "timestamp" not in entry:
@@ -58,19 +63,19 @@ def update_interaction_history(session_service, app_name, user_id, session_id, e
         # Add the entry to interaction history
         interaction_history.append(entry)
 
-        # Create updated state
-        updated_state = session.state.copy()
-        updated_state["interaction_history"] = interaction_history
+        # Update state with new interaction history
+        current_state["interaction_history"] = interaction_history
 
-        # Create a new session with updated state
+        # Update the session with new state
         session_service.create_session(
             app_name=app_name,
             user_id=user_id,
             session_id=session_id,
-            state=updated_state,
+            state=current_state,
         )
     except Exception as e:
         print(f"Error updating interaction history: {e}")
+        raise  # Re-raise the exception to handle it in the calling function
 
 
 def add_user_query_to_history(session_service, app_name, user_id, session_id, query):
@@ -107,7 +112,7 @@ def add_agent_response_to_history(
 def display_state(
     session_service, app_name, user_id, session_id, label="Current State"
 ):
-    """Display the current session state in a formatted way."""
+    """Display the current session state in a formatted way, reflecting the updated structure."""
     try:
         session = session_service.get_session(
             app_name=app_name, user_id=user_id, session_id=session_id
@@ -126,19 +131,66 @@ def display_state(
             print(f"  Monthly Income: {user_profile.get('monthly_income', 'Not provided')}")
             print(f"  Investment Experience: {user_profile.get('investment_experience', 'Not provided')}")
 
-        # Handle investment details
+        # --- Updated Investment Details Section ---
         print(f"\n{Colors.BOLD}💰 Investment Details:{Colors.RESET}")
-        print(f"  Investor Type: {session.state.get('investor_type', 'Not determined')}")
-        print(f"  Investment Goal: {session.state.get('investment_goal', 'Not set')}")
-        print(f"  Risk Tolerance: {session.state.get('risk_tolerance', 'Not assessed')}")
-        print(f"  Investment Horizon: {session.state.get('investment_horizon', 'Not specified')}")
+
+        investor_classification = session.state.get("investor_classification", {})
+        if investor_classification:
+            print(f"  {Colors.BOLD}Investor Classification:{Colors.RESET}")
+            print(f"    Type: {investor_classification.get('type', 'Not determined')}")
+            print(f"    Risk Tolerance Score: {investor_classification.get('risk_tolerance_score', 'Not assessed')}")
+
+        investment_goal = session.state.get("investment_goal", {})
+        if investment_goal:
+            print(f"  {Colors.BOLD}Investment Goal:{Colors.RESET}")
+            print(f"    Goal Type: {investment_goal.get('goal_type', 'Not set')}")
+            print(f"    Target Amount: {investment_goal.get('target_amount', 'Not set')}")
+            print(f"    Time Horizon (Years): {investment_goal.get('time_horizon_years', 'Not specified')}")
+            print(f"    Monthly SIP Target: {investment_goal.get('monthly_sip_target', 'Not calculated')}")
+
+        fund_recommendations = session.state.get("fund_recommendations", [])
+        if fund_recommendations:
+            print(f"  {Colors.BOLD}Fund Recommendations:{Colors.RESET}")
+            for idx, fund in enumerate(fund_recommendations, 1):
+                print(f"    {idx}. Fund Name: {fund.get('name', 'N/A')}")
+                print(f"       Fund ID: {fund.get('fund_id', 'N/A')}")
+                print(f"       Category: {fund.get('category', 'N/A')}")
+                print(f"       Risk Level: {fund.get('risk_level', 'N/A')}")
+                # Add more fund details as needed
+        else:
+            print(f"  Fund Recommendations: None")
+
+        selected_fund = session.state.get("selected_fund", {})
+        if selected_fund and selected_fund.get("fund_id"):
+            print(f"  {Colors.BOLD}Selected Fund:{Colors.RESET}")
+            print(f"    Name: {selected_fund.get('name', 'N/A')}")
+            print(f"    ID: {selected_fund.get('fund_id', 'N/A')}")
+        else:
+            print(f"  Selected Fund: None")
+            
+        investment_status = session.state.get("investment_status", {})
+        if investment_status:
+            print(f"  {Colors.BOLD}Investment Status:{Colors.RESET}")
+            print(f"    User Account Created: {investment_status.get('user_account_created', 'N/A')}")
+            print(f"    Logged In Investment Portal: {investment_status.get('logged_in_investment_portal', 'N/A')}")
+            print(f"    SIP Initiated: {investment_status.get('sip_initiated', 'N/A')}")
+            print(f"    SIP Transaction ID: {investment_status.get('sip_transaction_id', 'N/A')}")
+
+
+        current_agent_status = session.state.get("current_agent_status", {})
+        if current_agent_status:
+            print(f"  {Colors.BOLD}Current Agent Status:{Colors.RESET}")
+            print(f"    Current Agent: {current_agent_status.get('current_agent', 'N/A')}")
+            print(f"    Next Expected Input: {current_agent_status.get('next_expected_input', 'N/A')}")
+            print(f"    Last Agent Response: {current_agent_status.get('last_agent_response', 'N/A')}")
+        
+        # --- End of Updated Investment Details Section ---
 
         # Handle interaction history in a more readable way
         interaction_history = session.state.get("interaction_history", [])
         if interaction_history:
-            print("📝 Interaction History:")
+            print(f"\n{Colors.BOLD}📝 Interaction History:{Colors.RESET}")
             for idx, interaction in enumerate(interaction_history, 1):
-                # Pretty format dict entries, or just show strings
                 if isinstance(interaction, dict):
                     action = interaction.get("action", "interaction")
                     timestamp = interaction.get("timestamp", "unknown time")
@@ -166,17 +218,24 @@ def display_state(
                 else:
                     print(f"  {idx}. {interaction}")
         else:
-            print("📝 Interaction History: None")
+            print(f"\n{Colors.BOLD}📝 Interaction History: None{Colors.RESET}")
 
         # Show any additional state keys that might exist
-        other_keys = [
-            k
-            for k in session.state.keys()
-            if k not in ["user_profile", "investor_type", "investment_goal", 
-                        "risk_tolerance", "investment_horizon", "interaction_history"]
+        # Exclude all known top-level keys
+        known_keys = [
+            "user_profile",
+            "investor_classification",
+            "investment_goal",
+            "fund_recommendations",
+            "selected_fund",
+            "investment_status",
+            "current_agent_status",
+            "interaction_history"
         ]
+        other_keys = [k for k in session.state.keys() if k not in known_keys]
+
         if other_keys:
-            print(f"\n{Colors.BOLD}🔑 Additional State:{Colors.RESET}")
+            print(f"\n{Colors.BOLD}🔑 Additional State (Other Keys):{Colors.RESET}")
             for key in other_keys:
                 print(f"  {key}: {session.state[key]}")
 
@@ -195,9 +254,11 @@ async def process_agent_response(event):
         for part in event.content.parts:
             if hasattr(part, "text") and part.text and not part.text.isspace():
                 print(f"  Text: '{part.text.strip()}'")
+                has_specific_part = True # Indicate that some text was printed
 
     # Check for final response after specific parts
     final_response = None
+    # Only print final response if no specific parts were already printed to avoid duplication
     if not has_specific_part and event.is_final_response():
         if (
             event.content
@@ -241,38 +302,102 @@ async def call_agent_async(runner, user_id, session_id, query):
     )
 
     try:
+        # Verify session exists before processing
+        session = runner.session_service.get_session(
+            app_name=runner.app_name,
+            user_id=user_id,
+            session_id=session_id
+        )
+        if not session:
+            raise Exception(f"Session not found: {session_id}")
+
+        # Get current state
+        current_state = session.state.copy()
+        
+        # Initialize or update current agent status
+        if "current_agent_status" not in current_state:
+            current_state["current_agent_status"] = {
+                "current_agent": None,
+                "next_expected_input": None,
+                "last_agent_response": None,
+                "previous_agent": None  # Track previous agent for context
+            }
+        
+        # Store previous agent before updating
+        current_state["current_agent_status"]["previous_agent"] = current_state["current_agent_status"].get("current_agent")
+        
+        # Update session with new state
+        runner.session_service.create_session(
+            app_name=runner.app_name,
+            user_id=user_id,
+            session_id=session_id,
+            state=current_state
+        )
+
         async for event in runner.run_async(
             user_id=user_id, session_id=session_id, new_message=content
         ):
             # Capture the agent name from the event if available
             if event.author:
                 agent_name = event.author
+                # Update current agent in state
+                current_state["current_agent_status"]["current_agent"] = agent_name
+                # Update next expected input based on agent
+                if agent_name == "MutualFundAdvisor":
+                    current_state["current_agent_status"]["next_expected_input"] = "name"
+                elif agent_name == "UserProfileAgent":
+                    current_state["current_agent_status"]["next_expected_input"] = "user_details"
+                elif agent_name == "InvestorClassifierAgent":
+                    current_state["current_agent_status"]["next_expected_input"] = "risk_assessment"
+                elif agent_name == "GoalPlannerAgent":
+                    current_state["current_agent_status"]["next_expected_input"] = "investment_goal"
+                elif agent_name == "FundRecommenderAgent":
+                    current_state["current_agent_status"]["next_expected_input"] = "fund_selection"
+                elif agent_name == "InvestmentAgent":
+                    current_state["current_agent_status"]["next_expected_input"] = "investment_setup"
+                
+                runner.session_service.create_session(
+                    app_name=runner.app_name,
+                    user_id=user_id,
+                    session_id=session_id,
+                    state=current_state
+                )
 
             response = await process_agent_response(event)
             if response:
                 final_response_text = response
-    except Exception as e:
-        print(f"{Colors.BG_RED}{Colors.WHITE}ERROR during agent run: {e}{Colors.RESET}")
+                # Update last agent response in state
+                current_state["current_agent_status"]["last_agent_response"] = final_response_text
+                runner.session_service.create_session(
+                    app_name=runner.app_name,
+                    user_id=user_id,
+                    session_id=session_id,
+                    state=current_state
+                )
 
-    # Add the agent response to interaction history if we got a final response
-    if final_response_text and agent_name:
-        add_agent_response_to_history(
+        # Add the agent response to interaction history if we got a final response
+        if final_response_text and agent_name:
+            add_agent_response_to_history(
+                runner.session_service,
+                runner.app_name,
+                user_id,
+                session_id,
+                agent_name,
+                final_response_text,
+            )
+
+        # Display state after processing the message
+        display_state(
             runner.session_service,
             runner.app_name,
             user_id,
             session_id,
-            agent_name,
-            final_response_text,
+            "State AFTER processing",
         )
 
-    # Display state after processing the message
-    display_state(
-        runner.session_service,
-        runner.app_name,
-        user_id,
-        session_id,
-        "State AFTER processing",
-    )
+    except Exception as e:
+        print(f"{Colors.BG_RED}{Colors.WHITE}ERROR during agent run: {e}{Colors.RESET}")
+        raise  # Re-raise the exception to handle it in the calling function
 
     print(f"{Colors.YELLOW}{'-' * 30}{Colors.RESET}")
     return final_response_text
