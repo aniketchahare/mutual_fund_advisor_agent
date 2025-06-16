@@ -1,4 +1,8 @@
 from datetime import datetime
+import asyncio
+import logging
+from typing import Dict, Any, Optional
+from mutual_fund_advisor_agent.output_formats import ValidationError, AgentStatus
 
 from google.genai import types
 
@@ -283,121 +287,143 @@ async def process_agent_response(event):
     return final_response
 
 
-async def call_agent_async(runner, user_id, session_id, query):
-    """Call the agent asynchronously with the user's query."""
-    content = types.Content(role="user", parts=[types.Part(text=query)])
-    print(
-        f"\n{Colors.BG_GREEN}{Colors.BLACK}{Colors.BOLD}--- Running Query: {query} ---{Colors.RESET}"
-    )
-    final_response_text = None
-    agent_name = None
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    # Display state before processing the message
-    display_state(
-        runner.session_service,
-        runner.app_name,
-        user_id,
-        session_id,
-        "State BEFORE processing",
-    )
-
+async def call_agent_async(
+    runner,
+    user_id: str,
+    session_id: str,
+    message: str
+) -> Dict[str, Any]:
+    """
+    Asynchronously call an agent and handle its response.
+    
+    Args:
+        runner: The runner instance containing the agent and session service
+        user_id: The user ID
+        session_id: The current session ID
+        message: The user's message
+        
+    Returns:
+        Dict containing the agent's response and updated session state
+    """
     try:
-        # Verify session exists before processing
-        session = runner.session_service.get_session(
+        # Get current session state
+        current_session = runner.session_service.get_session(
             app_name=runner.app_name,
             user_id=user_id,
             session_id=session_id
         )
-        if not session:
-            raise Exception(f"Session not found: {session_id}")
+        if not current_session:
+            raise ValueError(f"Session {session_id} not found")
 
-        # Get current state
-        current_state = session.state.copy()
+        # Create a copy of the current state to avoid modifying the original
+        current_state = current_session.state.copy()
         
-        # Initialize or update current agent status
-        if "current_agent_status" not in current_state:
-            current_state["current_agent_status"] = {
-                "current_agent": None,
-                "next_expected_input": None,
-                "last_agent_response": None,
-                "previous_agent": None  # Track previous agent for context
-            }
-        
-        # Store previous agent before updating
+        # Initialize or update current_agent_status
+        current_state["current_agent_status"] = current_state.get("current_agent_status", {})
         current_state["current_agent_status"]["previous_agent"] = current_state["current_agent_status"].get("current_agent")
         
-        # Update session with new state
+        # Store the previous agent for context
+        previous_agent = current_state["current_agent_status"].get("current_agent")
+        
+        # Update current agent status
+        current_state["current_agent_status"]["current_agent"] = runner.agent.name
+        current_state["current_agent_status"]["last_agent_response"] = message
+
+        # Determine next expected input based on current agent and state
+        next_expected_input = None
+        if runner.agent.name == "MutualFundAdvisorAgent":
+            if "consent_given" not in current_state:
+                next_expected_input = "consent"
+            elif not current_state.get("consent_given"):
+                next_expected_input = "consent"
+            else:
+                next_expected_input = "name"
+        elif runner.agent.name == "UserProfileAgent":
+            next_expected_input = "user_details"
+        elif runner.agent.name == "InvestorClassifierAgent":
+            next_expected_input = "risk_assessment"
+        elif runner.agent.name == "GoalPlannerAgent":
+            next_expected_input = "investment_goal"
+        elif runner.agent.name == "FundRecommenderAgent":
+            next_expected_input = "fund_selection"
+        elif runner.agent.name == "SIPCalculatorAgent":
+            next_expected_input = "sip_details"
+        elif runner.agent.name == "InvestmentAgent":
+            next_expected_input = "investment_confirmation"
+        
+        current_state["current_agent_status"]["next_expected_input"] = next_expected_input
+
+        # Update session state
         runner.session_service.create_session(
             app_name=runner.app_name,
             user_id=user_id,
             session_id=session_id,
             state=current_state
         )
+        
+        # Log the state before processing
+        logger.info(f"State before processing message: {current_state}")
 
+        # Create content for the message
+        content = types.Content(role="user", parts=[types.Part(text=message)])
+
+        # Run the agent and process the response stream
+        final_response = None
         async for event in runner.run_async(
-            user_id=user_id, session_id=session_id, new_message=content
+            user_id=user_id,
+            session_id=session_id,
+            new_message=content
         ):
-            # Capture the agent name from the event if available
-            if event.author:
-                agent_name = event.author
-                # Update current agent in state
-                current_state["current_agent_status"]["current_agent"] = agent_name
-                # Update next expected input based on agent
-                if agent_name == "MutualFundAdvisor":
-                    current_state["current_agent_status"]["next_expected_input"] = "name"
-                elif agent_name == "UserProfileAgent":
-                    current_state["current_agent_status"]["next_expected_input"] = "user_details"
-                elif agent_name == "InvestorClassifierAgent":
-                    current_state["current_agent_status"]["next_expected_input"] = "risk_assessment"
-                elif agent_name == "GoalPlannerAgent":
-                    current_state["current_agent_status"]["next_expected_input"] = "investment_goal"
-                elif agent_name == "FundRecommenderAgent":
-                    current_state["current_agent_status"]["next_expected_input"] = "fund_selection"
-                elif agent_name == "InvestmentAgent":
-                    current_state["current_agent_status"]["next_expected_input"] = "investment_setup"
-                
-                runner.session_service.create_session(
-                    app_name=runner.app_name,
-                    user_id=user_id,
-                    session_id=session_id,
-                    state=current_state
-                )
-
-            response = await process_agent_response(event)
-            if response:
-                final_response_text = response
-                # Update last agent response in state
-                current_state["current_agent_status"]["last_agent_response"] = final_response_text
-                runner.session_service.create_session(
-                    app_name=runner.app_name,
-                    user_id=user_id,
-                    session_id=session_id,
-                    state=current_state
-                )
-
-        # Add the agent response to interaction history if we got a final response
-        if final_response_text and agent_name:
-            add_agent_response_to_history(
-                runner.session_service,
-                runner.app_name,
-                user_id,
-                session_id,
-                agent_name,
-                final_response_text,
-            )
-
-        # Display state after processing the message
-        display_state(
-            runner.session_service,
-            runner.app_name,
-            user_id,
-            session_id,
-            "State AFTER processing",
+            if event.is_final_response():
+                if event.content and event.content.parts:
+                    final_response = event.content.parts[0].text.strip()
+                    break
+        
+        if not final_response:
+            raise ValidationError("No response received from agent")
+        
+        # Update session state with agent response
+        current_state["current_agent_status"]["last_agent_response"] = final_response
+        
+        # Handle consent response
+        if runner.agent.name == "MutualFundAdvisorAgent" and "consent" in next_expected_input:
+            if "yes" in message.lower() or "sure" in message.lower() or "okay" in message.lower():
+                current_state["consent_given"] = True
+                current_state["current_agent_status"]["next_expected_input"] = "name"
+            elif "no" in message.lower() or "don't" in message.lower() or "not" in message.lower():
+                current_state["consent_given"] = False
+                final_response = "I understand. Without your consent, I cannot proceed with collecting personal information. Please let me know if you change your mind."
+        
+        # Add to interaction history
+        if "interaction_history" not in current_state:
+            current_state["interaction_history"] = []
+        current_state["interaction_history"].append({
+            "agent": runner.agent.name,
+            "message": final_response,
+            "timestamp": asyncio.get_event_loop().time()
+        })
+        
+        # Update the session state
+        runner.session_service.create_session(
+            app_name=runner.app_name,
+            user_id=user_id,
+            session_id=session_id,
+            state=current_state
         )
+        
+        # Log the state after processing
+        logger.info(f"State after processing message: {current_state}")
+        
+        # Return user-friendly message
+        return {"message": final_response}
 
+    except ValidationError as e:
+        logger.error(f"Validation error: {str(e)}")
+        return {"message": f"I need some clarification: {str(e)}"}
     except Exception as e:
-        print(f"{Colors.BG_RED}{Colors.WHITE}ERROR during agent run: {e}{Colors.RESET}")
-        raise  # Re-raise the exception to handle it in the calling function
-
-    print(f"{Colors.YELLOW}{'-' * 30}{Colors.RESET}")
-    return final_response_text
+        logger.error(f"Error in call_agent_async: {str(e)}")
+        return {"message": f"I apologize, but I encountered an error: {str(e)}"}

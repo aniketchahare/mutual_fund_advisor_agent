@@ -6,8 +6,15 @@ from dotenv import load_dotenv
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from utils import Colors, add_user_query_to_history, call_agent_async, display_state, add_agent_response_to_history
+from mutual_fund_advisor_agent.output_formats import ValidationError, AgentStatus
+import logging
+import uuid
 
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ===== PART 1: Initialize In-Memory Session Service =====
 # Using in-memory storage for this example (non-persistent)
@@ -15,7 +22,7 @@ load_dotenv()
 session_service = InMemorySessionService()
 
 # Global variables for the Gradio interface to ensure persistence
-APP_NAME = "Mutual Fund Advisor"
+APP_NAME = "Mutual_Fund_Advisor"
 USER_ID = "aiwithaniket" # In a real app, this would be dynamic per user.
 SESSION_ID = None # Will be set during run_gradio_interface setup
 runner = None # Will be set during run_gradio_interface setup
@@ -52,10 +59,12 @@ initial_state_template = {
         "sip_transaction_id": None
     },
     "current_agent_status": {
-        "current_agent": None,
-        "next_expected_input": None,
+        "current_agent": "MutualFundAdvisorAgent",
+        "previous_agent": None,
+        "next_expected_input": "consent",
         "last_agent_response": None
     },
+    "consent_given": False,
     "interaction_history": [],
 }
 
@@ -102,8 +111,9 @@ def run_gradio_interface():
             
             # Initialize current agent status
             current_state["current_agent_status"] = {
-                "current_agent": "MutualFundAdvisor",
-                "next_expected_input": "name",
+                "current_agent": "MutualFundAdvisorAgent",
+                "previous_agent": None,
+                "next_expected_input": "consent",
                 "last_agent_response": None
             }
             
@@ -115,11 +125,10 @@ def run_gradio_interface():
                 state=current_state
             )
             
-            initial_greeting = "👋 Hello! I'm your Mutual Fund Advisor. Let's get started with your investment journey. What's your name?"
-            add_agent_response_to_history(session_service, APP_NAME, USER_ID, SESSION_ID, "MutualFundAdvisor", initial_greeting)
-            return [("", initial_greeting)]
+            # Let the parent agent handle the initial greeting
+            return []
         except Exception as e:
-            print(f"{Colors.RED}Error resetting session: {e}{Colors.RESET}")
+            logger.error(f"Error resetting session: {str(e)}")
             return [("", "I apologize, but I encountered an error resetting the chat. Please try refreshing the page.")]
 
     # Gradio Chat handler
@@ -145,22 +154,29 @@ def run_gradio_interface():
             add_user_query_to_history(session_service, APP_NAME, USER_ID, SESSION_ID, message)
 
             # Process the user query through the agent
-            agent_response_text = await call_agent_async(runner, USER_ID, SESSION_ID, message)
+            agent_response = await call_agent_async(
+                runner=runner,
+                user_id=USER_ID,
+                session_id=SESSION_ID,
+                message=message
+            )
 
             # Add agent response to history in Gradio chatbot
-            if agent_response_text:
-                # Ensure we're not displaying raw JSON if the agent accidentally returns it
-                if isinstance(agent_response_text, (dict, list)):
-                    agent_response_text = str(agent_response_text)
-                history.append((message, agent_response_text))
+            if agent_response and "message" in agent_response:
+                history.append((message, agent_response["message"]))
 
             # Display current ADK session state for debugging (optional in production)
             display_state(session_service, APP_NAME, USER_ID, SESSION_ID, "Gradio Session State")
 
             return "", history
 
+        except ValidationError as e:
+            logger.error(f"Validation error: {str(e)}")
+            error_message = f"I need some clarification: {str(e)}"
+            history.append((message, error_message))
+            return "", history
         except Exception as e:
-            print(f"{Colors.RED}Error in chat_agent: {e}{Colors.RESET}")
+            logger.error(f"Error in chat_agent: {str(e)}")
             error_message = "I apologize, but I encountered an error. Please try again or refresh the page to start a new conversation."
             history.append((message, error_message))
             return "", history
