@@ -1,22 +1,25 @@
-"""
-Investor Classifier Agent
-
-This agent is responsible for analyzing user profile data and classifying the investor type
-based on various factors including risk tolerance, investment experience, financial situation,
-and investment goals.
-"""
-
 from google.adk.agents import LlmAgent
+from pydantic import BaseModel, Field
+from typing import Literal
 
 # --- Constants ---
 GEMINI_MODEL = "gemini-2.0-flash"
 
-# Create the investor classifier agent
+# --- Output Schema for Investor Classification ---
+class InvestorTypeOutput(BaseModel):
+    investor_type: Literal["Conservative", "Balanced", "Aggressive"] = Field(
+        ..., description="Investor classification based on user profile analysis"
+    )
+    reason: str = Field(
+        ..., description="Justification for the classification based on risk tolerance and investment horizon"
+    )
+
+# --- LLM Agent Definition ---
 investor_classifier_agent = LlmAgent(
     name="InvestorClassifierAgent",
     model=GEMINI_MODEL,
-    description = "Evaluates user profile to classify the investor type based on risk appetite and investment horizon.",
-    instruction = """
+    description="Evaluates user profile to classify the investor type based on risk appetite and investment horizon.",
+    instruction="""
     Role:
     - Analyze the user's risk tolerance and investment horizon to determine their investor type.
 
@@ -33,7 +36,19 @@ investor_classifier_agent = LlmAgent(
     - Use only validated information already gathered.
     - Do not re-ask questions or repeat answers.
     - Respect user privacy if any data is missing (optional fields).
-    - Once classification is done, seamlessly pass the process to the next stage (handled in the background).
+    - Do not show any other agent name or tool name to the user.
+    - Do not tell user that you are forwarding the interaction to the **GoalPlannerAgent** to handle the next step.
+    - Do not tell user that you are transfering the calls to agents.
+    - Keep the conversation focused and professional.
+    - Do not show json format to the user.
+    - Once the classification is done, smoothly forward the interaction to the **GoalPlannerAgent** to handle the next step(this is mandatory to proceed further).
+    - Once the classification is done, return the Output in the format of InvestorTypeOutput.
+    
+    Output Format:
+    - Return information in summary format.
+        - eg. InvestorTypeOutput:
+            - Investor type: Conservative
+            - Reason: Low risk tolerance and short investment horizon
     """,
     output_key="investor_type",
 )

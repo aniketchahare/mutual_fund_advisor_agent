@@ -1,25 +1,17 @@
-"""
-Investment Agent
-
-This agent is responsible for handling the investment process after fund selection,
-including user registration/login and setting up the investment.
-"""
-
 import os
-from google.adk.agents import LlmAgent
-from google.adk.tools.agent_tool import AgentTool
 import requests
 from typing import Dict, Any
+from google.adk.agents import LlmAgent
+from pydantic import BaseModel, Field
+from datetime import date
 
-# --- Constants ---
+# Constants
 GEMINI_MODEL = "gemini-2.0-flash"
 BASE_URL = os.getenv("MUTUAL_FUND_SERVER_BASE_URL")
 
+# API functions
 def create_user_api(name: str, email: str, password: str, phone_number: str) -> Dict[str, Any]:
-    """Create a new user in the investment portal and return the response (including JWT token)."""
-    headers = {
-        'Content-Type': 'application/json'
-    }
+    headers = {"Content-Type": "application/json"}
     payload = {
         "name": name,
         "email": email,
@@ -31,23 +23,16 @@ def create_user_api(name: str, email: str, password: str, phone_number: str) -> 
     return response.json()
 
 def login_investment_portal(email: str, password: str) -> Dict[str, Any]:
-    """Login to the investment portal and return the response (including JWT token)."""
-    headers = {
-        'Content-Type': 'application/json'
-    }
-    payload = {
-        "email": email,
-        "password": password
-    }
+    headers = {"Content-Type": "application/json"}
+    payload = {"email": email, "password": password}
     response = requests.post(f"{BASE_URL}/users/login", headers=headers, json=payload)
     response.raise_for_status()
     return response.json()
 
 def start_sip_api(fund_id: str, amount: float, frequency: str, deduction_day: int, start_date: str, end_date: str, jwt_token: str) -> Dict[str, Any]:
-    """Start a SIP for a mutual fund using the new transactions API."""
     headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {jwt_token}'
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {jwt_token}"
     }
     payload = {
         "fundId": fund_id,
@@ -57,147 +42,104 @@ def start_sip_api(fund_id: str, amount: float, frequency: str, deduction_day: in
         "startDate": start_date,
         "endDate": end_date
     }
-    print(payload)
     response = requests.post(f"{BASE_URL}/transactions/sip", headers=headers, json=payload)
     response.raise_for_status()
     return response.json()
 
-# Create the investment agent
+# Output Schema
+class InvestmentDetailsOutput(BaseModel):
+    fund_id: str = Field(..., description="ID of the selected mutual fund")
+    fund_name: str = Field(..., description="Name of the selected mutual fund")
+    amount: float = Field(..., description="Monthly SIP investment amount")
+    frequency: str = Field(default="Monthly", description="Frequency of SIP (Monthly by default)")
+    deduction_day: int = Field(..., ge=1, le=31, description="Day of the month for SIP deduction")
+    start_date: str = Field(..., description="SIP start date in YYYY-MM-DD format")
+    end_date: str = Field(..., description="SIP end date in YYYY-MM-DD format")
+
+# Agent definition
 investment_agent = LlmAgent(
     name="InvestmentAgent",
     model=GEMINI_MODEL,
     description="Handles the investment process after fund selection.",
-    instruction="""
-    Role:
-    - Handle user registration/login
-    - Guide through investment setup
-    - Process investment transactions
-    - Confirm investment completion
+    # output_schema=InvestmentDetailsOutput,
+    instruction=f"""
+          Role:
+          - Guide the user through investing in a mutual fund via SIP (Systematic Investment Plan).
 
-    Conversation Flow:
-    1. Investment Initiation:
-       - First, verify selected_fund from session state:
-         * Check if recommended_funds.selected_fund exists and has valid _id and name
-         * If valid, proceed with investment process
-         * If invalid or missing _id, respond: "I notice there's an issue with the fund selection. Let me help you choose a fund again."
-         * Then internally pass control to FundRecommenderAgent
-       - Store fund details in session state:
-         * recommended_funds.selected_fund._id (required for API calls)
-         * recommended_funds.selected_fund.name
-         * recommended_funds.selected_fund.min_sip_amount
-         * recommended_funds.selected_fund.category
-         * recommended_funds.selected_fund.risk_level
+          1. Fund Validation:
+            - Retrieve selected_fund from session state (recommended_funds.selected_fund).
+            - If it's missing or has no _id, reply:
+              "I notice there's an issue with the fund selection. Let me help you choose a fund again."
+              - Set flow_stage = "funds_recommended"
+              - Internally return control to FundRecommenderAgent
 
-    2. Registration/Login:
-       - Check if user is registered:
-         * If not registered:
-           "To proceed with your investment in [recommended_funds.selected_fund.name], you'll need to create an account first."
-           "Let's start with your name. What's your full name?"
-           - Wait for name
-           "Great! What's your email address?"
-           - Wait for email
-           "Please create a password (at least 8 characters):"
-           - Wait for password
-           "Finally, what's your phone number?"
-           - Wait for phone number
-           Use create_user_api to register
-           - Store user details in session state:
-             * user_profile.name
-             * user_profile.email
-             * user_profile.phone_number
-         * If registered:
-           "Please enter your email address to login:"
-           - Wait for email
-           "And your password:"
-           - Wait for password
-           Use login_investment_portal to login
-           - Store JWT token in session state
+          2. Registration/Login Decision:
+            - Ask: "Have you already registered on our investment portal, or would you like to create a new account?"
+            - If user is already registered:
+              * Ask for email and password.
+              * Call login_investment_portal
+              * Store: user_profile.email, jwt_token
+            - If user is new:
+              * Ask for name, email, password, and phone number
+              * Call create_user_api
+              * Store: user_profile.name, email, phone_number, jwt_token
 
-    3. Investment Setup:
-       - After successful login:
-         "Great! Now let's set up your investment for [recommended_funds.selected_fund.name]"
-         "What amount would you like to invest monthly? (Minimum ₹[recommended_funds.selected_fund.min_sip_amount])"
-         - Wait for amount
-         "On which day of the month would you like the SIP to be deducted? (1-31)"
-         - Wait for deduction_day
-         "Start Date: [Current date in YYYY-MM-DD format]"
-         "When would you like to end the SIP? (YYYY-MM-DD)"
-         - Wait for end_date
-         - Verify recommended_funds.selected_fund._id exists before making API call
-         Use start_sip_api to create SIP
-         - python
-             start_sip_api(
-                 fund_id=recommended_funds.selected_fund._id,  # Must be present from FundRecommenderAgent
-                 amount=amount,
-                 frequency="Monthly",
-                 deduction_day=deduction_day,
-                 start_date=start_date,
-                 end_date=end_date,
-                 jwt_token=jwt_token
-             )
-         - Store investment details in session state:
-           * investment_details.amount
-           * investment_details.frequency
-           * investment_details.deduction_day
-           * investment_details.start_date
-           * investment_details.end_date
+          3. SIP Setup:
+            - Confirm selected fund using recommended_funds.selected_fund.name, recommended_funds.selected_fund._id, and recommended_funds.selected_fund.min_sip_amount
+            - Ask:
+              * "What amount would you like to invest monthly? (Minimum ₹[min_sip_amount])"
+              * "On which day of the month should the SIP be deducted? (1-31)"
+              * "When would you like to end the SIP? (format: YYYY-MM-DD)"
+            - Default start_date = today’s date in YYYY-MM-DD
 
-    4. Investment Confirmation:
-       - After successful transaction:
-         "Great! Your investment has been set up successfully."
-         "Fund: [recommended_funds.selected_fund.name]"
-         "Amount: ₹[Amount]"
-         "Frequency: Monthly"
-         "Start Date: [Date]"
-         "End Date: [Date]"
-         "Your investment journey has begun! 🎉"
-         - Set flow_stage to "investment_complete"
+          4. SIP Execution:
+            - fund_id = recommended_funds.selected_fund._id (is the unique id of the fund selected by the user)
+            - Call start_sip_api with:
+              * fund_id, amount, frequency, deduction_day, start_date, end_date, jwt_token
+            - Store investment_details in session:
+              * amount, frequency, deduction_day, start_date, end_date
 
-    Session State Management:
-    - Always verify recommended_funds.selected_fund from session state before proceeding
-    - Maintain these key states:
-      * recommended_funds.selected_fund (complete fund object from FundRecommenderAgent, including _id)
-      * user_profile (registration/login details)
-      * investment_details (SIP setup details)
-      * flow_stage (current stage of investment process)
-      * jwt_token (for authenticated API calls)
+          5. Confirmation:
+            - On success, respond:
+              "✅ Your investment in [fund_name] has been set up!"
+              "Monthly Amount: ₹[investment_details.amount], Deduction Day: [investment_details.deduction_day], Duration: [investment_details.start_date] to [investment_details.end_date]"
+              "You're all set to grow your wealth! 🎉"
+              - Set flow_stage = "investment_complete"
 
-    Response Format:
-    Provide a natural, conversational response that includes:
-    - Registration/login requirements
-    - Investment setup details
-    - Transaction confirmation
-    - Never expose internal agent transfers or technical details
-
-    Guidelines:
-    - Always verify recommended_funds.selected_fund from session state before any action
-    - Never proceed without a valid recommended_funds.selected_fund with _id
-    - Use recommended_funds.selected_fund details for all investment steps
-    - Ask one question at a time
-    - Wait for user response before proceeding
-    - Validate each input
-    - Keep responses focused on investment process
-    - No additional questions beyond transaction requirements
-    - Maintain all important details in session state
-    - Never expose internal agent transfers or technical details to the user
-    - Always provide natural, conversational responses
-
-    Error Handling:
-    - If recommended_funds.selected_fund missing or invalid:
-      * Respond: "I notice there's an issue with the fund selection. Let me help you choose a fund again."
-      * Set flow_stage to "funds_recommended"
-      * Internally pass control to FundRecommenderAgent
-    - If recommended_funds.selected_fund._id is missing:
-      * Respond: "I notice there's an issue with the fund selection. Let me help you choose a fund again."
-      * Set flow_stage to "funds_recommended"
-      * Internally pass control to FundRecommenderAgent
-    - If registration/login fails:
-      * Guide user to provide correct details
-      * Retry the process
-    - If investment details invalid:
-      * Ask for correct details
-      * Validate before proceeding
-    """,
+          Guidelines:
+          - Collect the data by asking one question at a time and give options to choose from.
+          - Ask Frequency question with ShowOption enabled
+            - in a new line & give a options to choose from in new line.
+            - eg. Frequency:
+                - 1. Monthly
+                - 2. Quarterly
+                - 3. Yearly
+          - Set/update the user input or answer in the format of InvestmentDetailsOutput one by one.
+          - Always verify selected_fund before proceeding.
+          - Always store and validate user/session data.
+          - Never expose tool/internal names to the user.
+          - Validate each user input (e.g., email format, password length, amount >= min_sip).
+          - Use friendly and helpful tone throughout.
+          - Do not show any other agent name or tool name to the user.
+          - Do not tell user that you are forwarding the interaction to the **MutualFundAdvisorAgent** to handle the next step.
+          - Do not show json format to the user.
+          - After collecting the necessary information, return the Output in the format of InvestmentDetailsOutput.
+          - After collecting the necessary information, smoothly forward the interaction to the **MutualFundAdvisorAgent** to handle the next step(this is mandatory to proceed further).
+          
+          Output Format:
+          - Return information in summary format.
+              - eg. InvestmentDetailsOutput:
+                  - Fund ID: 1234567890
+                  - Fund Name: Axis Small Cap Fund
+                  - Amount: 10000
+                  - Frequency: Monthly
+                  - Deduction Day: 15
+                  - Start Date: 2025-01-01
+          """,
     output_key="investment_details",
-    tools=[create_user_api, login_investment_portal, start_sip_api]
-) 
+    tools=[
+        create_user_api,
+        login_investment_portal,
+        start_sip_api
+    ],
+)
