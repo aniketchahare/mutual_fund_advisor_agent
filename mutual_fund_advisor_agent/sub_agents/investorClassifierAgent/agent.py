@@ -1,18 +1,7 @@
 from google.adk.agents import LlmAgent
-from pydantic import BaseModel, Field
-from typing import Literal
 
 # --- Constants ---
 GEMINI_MODEL = "gemini-2.0-flash"
-
-# --- Output Schema for Investor Classification ---
-class InvestorTypeOutput(BaseModel):
-    investor_type: Literal["Conservative", "Balanced", "Aggressive"] = Field(
-        ..., description="Investor classification based on user profile analysis"
-    )
-    reason: str = Field(
-        ..., description="Justification for the classification based on risk tolerance and investment horizon"
-    )
 
 # --- LLM Agent Definition ---
 investor_classifier_agent = LlmAgent(
@@ -43,12 +32,6 @@ investor_classifier_agent = LlmAgent(
     - Do not show json format to the user.
     - Once the classification is done, smoothly forward the interaction to the **GoalPlannerAgent** to handle the next step(this is mandatory to proceed further).
     - Once the classification is done, return the Output in the format of InvestorTypeOutput.
-    
-    Output Format:
-    - Return information in summary format.
-        - eg. InvestorTypeOutput:
-            - Investor type: Conservative
-            - Reason: Low risk tolerance and short investment horizon
     """,
     output_key="investor_type",
 )

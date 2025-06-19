@@ -2,15 +2,15 @@ import os
 import requests
 from typing import Dict, Any
 from google.adk.agents import LlmAgent
-from pydantic import BaseModel, Field
-from datetime import date
+from google.adk.tools import ToolContext
 
 # Constants
 GEMINI_MODEL = "gemini-2.0-flash"
 BASE_URL = os.getenv("MUTUAL_FUND_SERVER_BASE_URL")
 
 # API functions
-def create_user_api(name: str, email: str, password: str, phone_number: str) -> Dict[str, Any]:
+def create_user_api(name: str, email: str, password: str, phone_number: str, tool_context: ToolContext) -> Dict[str, Any]:
+    """Create a new user in the investment portal."""
     headers = {"Content-Type": "application/json"}
     payload = {
         "name": name,
@@ -20,16 +20,38 @@ def create_user_api(name: str, email: str, password: str, phone_number: str) -> 
     }
     response = requests.post(f"{BASE_URL}/users/register", headers=headers, json=payload)
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    if "user" in data:
+        tool_context.state["user_registered"] = True
+    else:
+        tool_context.state["user_registered"] = False
+    return {
+        "action": "create_user_api",
+        "data": data.get("user", None),
+        "message": "User created successfully" if "user" in data else "User creation failed",
+    }
 
-def login_investment_portal(email: str, password: str) -> Dict[str, Any]:
+def login_investment_portal(email: str, password: str, tool_context: ToolContext) -> Dict[str, Any]:
+    """Login to the investment portal."""
     headers = {"Content-Type": "application/json"}
     payload = {"email": email, "password": password}
     response = requests.post(f"{BASE_URL}/users/login", headers=headers, json=payload)
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    if "user" in data and "token" in data:
+        tool_context.state["user_registered"] = True
+        tool_context.state["jwt_token"] = data["token"]
+    else:
+        tool_context.state["user_registered"] = False
+        tool_context.state["jwt_token"] = None
+    return {
+        "action": "login_investment_portal",
+        "data": data,
+        "message": "Login successful" if "token" in data else "Login failed",
+    }
 
-def start_sip_api(fund_id: str, amount: float, frequency: str, deduction_day: int, start_date: str, end_date: str, jwt_token: str) -> Dict[str, Any]:
+def start_sip_api(fund_id: str, amount: float, frequency: str, deduction_day: int, start_date: str, end_date: str, jwt_token: str, tool_context: ToolContext) -> Dict[str, Any]:
+    """Start a SIP in the investment portal."""
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {jwt_token}"
@@ -44,24 +66,22 @@ def start_sip_api(fund_id: str, amount: float, frequency: str, deduction_day: in
     }
     response = requests.post(f"{BASE_URL}/transactions/sip", headers=headers, json=payload)
     response.raise_for_status()
-    return response.json()
-
-# Output Schema
-class InvestmentDetailsOutput(BaseModel):
-    fund_id: str = Field(..., description="ID of the selected mutual fund")
-    fund_name: str = Field(..., description="Name of the selected mutual fund")
-    amount: float = Field(..., description="Monthly SIP investment amount")
-    frequency: str = Field(default="Monthly", description="Frequency of SIP (Monthly by default)")
-    deduction_day: int = Field(..., ge=1, le=31, description="Day of the month for SIP deduction")
-    start_date: str = Field(..., description="SIP start date in YYYY-MM-DD format")
-    end_date: str = Field(..., description="SIP end date in YYYY-MM-DD format")
+    data = response.json()
+    if "_id" in data:
+        tool_context.state["sip_started"] = True
+    else:
+        tool_context.state["sip_started"] = False
+    return {
+        "action": "start_sip_api",
+        "data": data,
+        "message": "SIP started successfully" if "_id" in data else "SIP start failed",
+    }
 
 # Agent definition
 investment_agent = LlmAgent(
     name="InvestmentAgent",
     model=GEMINI_MODEL,
     description="Handles the investment process after fund selection.",
-    # output_schema=InvestmentDetailsOutput,
     instruction=f"""
           Role:
           - Guide the user through investing in a mutual fund via SIP (Systematic Investment Plan).
@@ -90,7 +110,7 @@ investment_agent = LlmAgent(
               * "What amount would you like to invest monthly? (Minimum ₹[min_sip_amount])"
               * "On which day of the month should the SIP be deducted? (1-31)"
               * "When would you like to end the SIP? (format: YYYY-MM-DD)"
-            - Default start_date = today’s date in YYYY-MM-DD
+            - Default start_date = today's date in YYYY-MM-DD
 
           4. SIP Execution:
             - fund_id = recommended_funds.selected_fund._id (is the unique id of the fund selected by the user)
@@ -126,17 +146,12 @@ investment_agent = LlmAgent(
           - After collecting the necessary information, return the Output in the format of InvestmentDetailsOutput.
           - After collecting the necessary information, smoothly forward the interaction to the **MutualFundAdvisorAgent** to handle the next step(this is mandatory to proceed further).
           
-          Output Format:
-          - Return information in summary format.
-              - eg. InvestmentDetailsOutput:
-                  - Fund ID: 1234567890
-                  - Fund Name: Axis Small Cap Fund
-                  - Amount: 10000
-                  - Frequency: Monthly
-                  - Deduction Day: 15
-                  - Start Date: 2025-01-01
+          Error Handling:
+          - If Registration/Login fails, ask the user to try again.
+          - In response of Register API, if user is already registered, ask the user to login.
+          - In response of Login API, if user is not registered, ask the user to register.
+          - In response of SIP API, if SIP start fails, ask the user to try again.
           """,
-    output_key="investment_details",
     tools=[
         create_user_api,
         login_investment_portal,

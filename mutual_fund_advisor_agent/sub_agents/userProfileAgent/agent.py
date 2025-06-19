@@ -6,24 +6,35 @@ required for investment planning and mutual fund recommendations.
 """
 
 from google.adk.agents import LlmAgent
-from pydantic import BaseModel, Field
-from typing import List, Optional
+from google.adk.tools.agent_tool import AgentTool
+from google.adk.tools import ToolContext
+from typing import Dict, Any
 
 # --- Constants ---
 GEMINI_MODEL = "gemini-2.0-flash"
 
-# --- Output Schema using Pydantic ---
-class UserProfileOutput(BaseModel):
-    name: str = Field(..., description="Name of the user")
-    age: int = Field(..., description="Age of the user")
-    monthly_income: float = Field(..., description="User's monthly income in INR")
-    assets: Optional[List[str]] = Field(None, description="Optional list of assets like FDs, gold, property")
-    existing_investments: List[str] = Field(..., description="Existing investments like PPF, MF, stocks")
-    risk_tolerance: str = Field(..., description="Risk appetite: Low, Medium, or High")
-    investment_horizon_years: int = Field(..., description="Number of years user wants to stay invested")
-    preferred_investment_mode: str = Field(..., description="SIP, Lumpsum, or Hybrid")
-    investment_experience: str = Field(..., description="Beginner, Intermediate, or Advanced")
+# --- Tool to update specific user_profile fields ---
+def set_user_profile_field(tool_context: ToolContext, field: str, value: str) -> Dict:
+    # Get user_profile, ensure it's a dict
+    profile = tool_context.state.get("user_profile")
 
+    # If it's None or a Pydantic model, convert it to a dict
+    if profile is None:
+        profile = {}
+    elif hasattr(profile, "dict"):
+        profile = profile.dict()
+
+    # Update field
+    profile[field] = value
+
+    # Assign back to tool_context
+    tool_context.state["user_profile"] = profile
+
+    return {
+        "action": "set_user_profile_field",
+        "data": profile,
+        "message": f"Set user_profile.{field} to {value}",
+    }
 
 # Create the user profile agent
 user_profile_agent = LlmAgent(
@@ -35,6 +46,17 @@ user_profile_agent = LlmAgent(
     - Collect structured user information required to begin mutual fund planning.
 
     Responsibilities:
+    - Collect the data by asking one question at a time and give options to choose from.
+    - set_user_profile_field tool is used to set the user_profile field in the session state.
+        - eg. set_user_profile_field(tool_context, "name", "John Doe")
+        - eg. set_user_profile_field(tool_context, "age", 30)
+        - eg. set_user_profile_field(tool_context, "monthly_income", 50000)
+        - eg. set_user_profile_field(tool_context, "assets", "FDs, gold, property")
+        - eg. set_user_profile_field(tool_context, "existing_investments", "PPF, MF, stocks")
+        - eg. set_user_profile_field(tool_context, "risk_tolerance", "Low")
+        - eg. set_user_profile_field(tool_context, "investment_horizon", 10)
+        - eg. set_user_profile_field(tool_context, "preferred_investment_mode", "SIP")
+        - eg. set_user_profile_field(tool_context, "investment_experience", "Beginner")
     - Engage the user naturally and professionally to gather the following:
     - Name
     - Age
@@ -49,7 +71,6 @@ user_profile_agent = LlmAgent(
     Guidelines:
     - Ensure a smooth, conversational tone — like a friendly, professional discussion.
     - Confirm responses are valid and complete.
-    - Collect the data by asking one question at a time and give options to choose from.
     - Ask each question with ShowOption enabled
         - in a new line & give a options to choose from in new line.
         - eg. Risk tolerance:
@@ -67,15 +88,7 @@ user_profile_agent = LlmAgent(
     - Do not show json format to the user.
     - After collecting the necessary information, smoothly forward the interaction to the **InvestorClassifierAgent** to handle the next step(this is mandatory to proceed further).
     - Once all key details are collected, return the Output in the format of UserProfileOutput.
-    
-    Output Format:
-    - Return information in summary format.
-        - eg. UserProfileOutput:
-            - Name: John Doe
-            - Age: 30
-            - Monthly income: 50000
-            - Assets: FDs, gold, property
-            - Existing investments: PPF, MF, stocks
     """,
-    output_key="user_profile",
+    # output_key="user_profile",
+    tools=[set_user_profile_field],
 )

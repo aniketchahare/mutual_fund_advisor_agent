@@ -1,19 +1,7 @@
 from google.adk.agents import LlmAgent
-from pydantic import BaseModel, Field
-from typing import Optional
 
 # --- Constants ---
 GEMINI_MODEL = "gemini-2.0-flash"
-
-# Define the output schema using Pydantic
-class SIPCalculatorOutput(BaseModel):
-    monthly_investment: float = Field(..., description="Monthly SIP amount input by the user (in ₹)")
-    investment_duration_years: float = Field(..., description="Duration of SIP investment in years")
-    expected_annual_return_rate: float = Field(..., description="Expected annual return rate in percentage (e.g., 12)")
-    total_invested: float = Field(..., description="Total amount invested over the period (in ₹)")
-    estimated_maturity_value: float = Field(..., description="Estimated future value of the SIP investment (in ₹)")
-    estimated_returns: float = Field(..., description="Estimated returns earned over invested amount (in ₹)")
-    inflation_adjusted_value: Optional[float] = Field(None, description="Optional: Future value adjusted for user-provided inflation rate")
 
 # Create the SIP Calculator agent
 sip_calculator_agent = LlmAgent(
@@ -50,7 +38,7 @@ sip_calculator_agent = LlmAgent(
 
     Tone & Flow:
     - Be conversational and explain calculations in simple terms:
-    - E.g., “If you invest ₹10,000 monthly for 10 years at 12%, your investment will grow to approximately ₹23,00,000.”
+    - E.g., "If you invest ₹10,000 monthly for 10 years at 12%, your investment will grow to approximately ₹23,00,000."
 
     Guidelines:
     - Compare variations (amount/duration) if requested.
@@ -62,16 +50,6 @@ sip_calculator_agent = LlmAgent(
     - Do not show json format to the user.
     - After collecting the necessary information, return the Output in the format of SIPCalculatorOutput.
     - After collecting the necessary information, smoothly forward the interaction to the **MutualFundAdvisorAgent** to handle the next step(this is mandatory to proceed further).
-    
-    Output Format:
-    - Return information in summary format.
-        - eg. SIPCalculatorOutput:
-            - Monthly investment: 10000
-            - Investment duration: 10 years
-            - Expected annual return rate: 12%
-            - Total invested: 1200000
-            - Estimated maturity value: 2300000
-            - Estimated returns: 1100000
     """,
     output_key="sip_calculator_output",
 )

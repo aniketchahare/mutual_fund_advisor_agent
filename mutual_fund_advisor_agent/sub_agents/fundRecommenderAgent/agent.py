@@ -1,54 +1,52 @@
 import os
+from typing import List, Dict, Any
 
 from google.adk.agents import LlmAgent
-from pydantic import BaseModel, Field
-from typing import List, Literal, Dict, Any
-from datetime import datetime
-import requests
 from google.adk.tools.agent_tool import AgentTool
+from google.adk.tools import ToolContext
+from ...schemas import RecommendedFund
+import requests
 from .validation_agent import fund_validation_agent
 
 # --- Constants ---
 GEMINI_MODEL = "gemini-2.0-flash"
 BASE_URL = os.getenv("MUTUAL_FUND_SERVER_BASE_URL")
 
-# --- Output Schema using Pydantic ---
-class FundReturn(BaseModel):
-    _1W: float
-    _1M: float
-    _3M: float
-    _6M: float
-    YTD: float
-    _1Y: float
-    _2Y: float
-    _3Y: float
-    _5Y: float
-    _10Y: float
-
-class RecommendedFund(BaseModel):
-    id: str = Field(..., alias="_id")
-    name: str
-    risk_level: str
-    fund_type: str
-    category: str
-    min_sip_amount: float
-    nav: float
-    fund_size: float
-    is_active: bool
-    returns: FundReturn
-    createdAt: datetime
-    updatedAt: datetime
-    recommendation_reason: str = Field(..., description="Why this fund was recommended")
-
-class FundRecommendationOutput(BaseModel):
-    recommended_funds: List[RecommendedFund] = Field(..., description="Top 2–3 funds recommended to the user")
-
 # --- Fund Fetcher ---
-def fetch_funds_api() -> List[Dict[str, Any]]:
+def fetch_funds_api(tool_context: ToolContext) -> List[Dict[str, Any]]:
     """Fetch mutual funds from the local API and return the data as a list of dicts following the schema."""
     response = requests.get(f"{BASE_URL}/funds")
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    print(f"Data: {data}")
+    tool_context.state["recommended_funds"] = data
+    print(f"Tool context: {tool_context.state}")
+    return {
+        "action": "fetch_funds_api",
+        "data": data,
+        "message": "Funds fetched successfully",
+    }
+    
+def select_fund(fund: RecommendedFund, tool_context: ToolContext) -> Dict[str, Any]:
+    """Select a fund from the recommended funds."""
+    tool_context.state["selected_fund"] = fund
+    return {
+        "action": "select_fund_api",
+        "data": fund,
+        "message": "Fund selected successfully",
+    }
+    
+def fetch_fund_details_api(fund_id: str, tool_context: ToolContext) -> Dict[str, Any]:
+    """Fetch details of a fund from the local API and return the data as a dict."""
+    response = requests.get(f"{BASE_URL}/funds/{fund_id}")
+    response.raise_for_status()
+    data = response.json()
+    tool_context.state["selected_fund"] = data
+    return {
+        "action": "fetch_fund_details_api",
+        "data": data,
+        "message": "Fund details fetched successfully" if "_id" in data else "Fund details fetch failed",
+    }
 
 # --- LLM Agent Definition ---
 fund_recommender_agent = LlmAgent(
@@ -65,7 +63,11 @@ fund_recommender_agent = LlmAgent(
       - Balanced → Hybrid or Large-cap Funds
       - Aggressive → Small-cap, Flexi-cap, or Thematic Funds
     - Provide a reason for each recommended fund (e.g., strong returns, suitability for goal).
+    - If ask for more funds, use fetch_funds_api to fetch the funds and validate the funds using fund_validation_agent.
     - Track shown_fund_ids to avoid duplicates and use fund_validation_agent if needed.
+    - Ask user if they want more details about the fund.
+    - If user wants more details, use select_fund to select the fund and fetch the details using fetch_fund_details_api.
+    - If user not selected any fund, ask user to select a fund to proceed further.
 
     Return Calculation:
     - For SIP return estimation, ask for monthly amount, duration, and expected return rate (default 12%)
@@ -99,15 +101,6 @@ fund_recommender_agent = LlmAgent(
     - Do not show json format to the user.
     - After collecting the necessary information, return the Output in the format of FundRecommendationOutput.
     - After collecting the necessary information, smoothly forward the interaction to the **MutualFundAdvisorAgent** to handle the next step(this is mandatory to proceed further).
-    
-    Output Format:
-    - Return information in summary format.
-        - eg. FundRecommendationOutput:
-            - Recommended funds:
-                - Axis Small Cap Fund
-                - ICICI Prudential Small Cap Fund
-                - HDFC Small Cap Fund
     """,
-    output_key="fund_recommendation",
-    tools=[fetch_funds_api, AgentTool(fund_validation_agent)],
+    tools=[fetch_funds_api, select_fund, fetch_fund_details_api, AgentTool(fund_validation_agent)],
 )

@@ -29,81 +29,6 @@ class Colors:
     BG_CYAN = "\033[46m"
     BG_WHITE = "\033[47m"
 
-
-# def update_interaction_history(session_service, app_name, user_id, session_id, entry):
-#     """Add an entry to the interaction history in state.
-
-#     Args:
-#         session_service: The session service instance
-#         app_name: The application name
-#         user_id: The user ID
-#         session_id: The session ID
-#         entry: A dictionary containing the interaction data
-#             - requires 'action' key (e.g., 'user_query', 'agent_response')
-#             - other keys are flexible depending on the action type
-#     """
-#     try:
-#         # Get current session
-#         session = session_service.get_session(
-#             app_name=app_name, user_id=user_id, session_id=session_id
-#         )
-        
-#         # Get current interaction history
-#         interaction_history = session.state.get("interaction_history", [])
-
-#         # Add timestamp if not already present
-#         if "timestamp" not in entry:
-#             entry["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-#         # Add the entry to interaction history
-#         interaction_history.append(entry)
-
-#         # Create updated state
-#         updated_state = session.state.copy()
-#         updated_state["interaction_history"] = interaction_history
-
-#         # Create a new session with updated state
-#         session_service.create_session(
-#             app_name=app_name,
-#             user_id=user_id,
-#             session_id=session_id,
-#             state=updated_state,
-#         )
-#     except Exception as e:
-#         print(f"Error updating interaction history: {e}")
-
-
-# def add_user_query_to_history(session_service, app_name, user_id, session_id, query):
-#     """Add a user query to the interaction history."""
-#     update_interaction_history(
-#         session_service,
-#         app_name,
-#         user_id,
-#         session_id,
-#         {
-#             "action": "user_query",
-#             "query": query,
-#         },
-#     )
-
-
-# def add_agent_response_to_history(
-#     session_service, app_name, user_id, session_id, agent_name, response
-# ):
-#     """Add an agent response to the interaction history."""
-#     update_interaction_history(
-#         session_service,
-#         app_name,
-#         user_id,
-#         session_id,
-#         {
-#             "action": "agent_response",
-#             "agent": agent_name,
-#             "response": response,
-#         },
-#     )
-
-
 # def display_state(
 #     session_service, app_name, user_id, session_id, label="Current State"
 # ):
@@ -258,6 +183,23 @@ async def call_agent_async(runner, user_id, session_id, query):
     )
     final_response_text = None
     agent_name = None
+    
+    # After final response and agent work is done
+    try:
+        # Get session state after agent run
+        session = await runner.session_service.get_session(user_id, session_id)
+        state = session.state
+
+        # ✅ Check if agent flow is complete (custom condition)
+        if state.get("sip_started") is True:
+            print(f"{Colors.BG_BLUE}{Colors.WHITE}Session complete. Deleting session...{Colors.RESET}")
+            await runner.session_service.delete_session(user_id, session_id)
+        else:
+            print(f"{Colors.CYAN}Session not yet complete. Keeping session active.{Colors.RESET}")
+
+    except Exception as e:
+        print(f"{Colors.BG_RED}{Colors.WHITE}Error while checking or deleting session: {e}{Colors.RESET}")
+
 
     # Display state before processing the message
     # display_state(
@@ -280,19 +222,15 @@ async def call_agent_async(runner, user_id, session_id, query):
             response = await process_agent_response(event)
             if response:
                 final_response_text = response
+    except ValueError as e:
+        if "fromisoformat" in str(e):
+            print(f"{Colors.BG_RED}{Colors.WHITE}ERROR: DateTime parsing issue. This might be due to database serialization. Trying to continue...{Colors.RESET}")
+            # Try to continue with a generic error message
+            final_response_text = "I encountered a technical issue with the session data. Let me help you start fresh. Please try your question again."
+        else:
+            print(f"{Colors.BG_RED}{Colors.WHITE}ERROR during agent run: {e}{Colors.RESET}")
     except Exception as e:
         print(f"{Colors.BG_RED}{Colors.WHITE}ERROR during agent run: {e}{Colors.RESET}")
-
-    # Add the agent response to interaction history if we got a final response
-    # if final_response_text and agent_name:
-    #     add_agent_response_to_history(
-    #         runner.session_service,
-    #         runner.app_name,
-    #         user_id,
-    #         session_id,
-    #         agent_name,
-    #         final_response_text,
-    #     )
 
     # Display state after processing the message
     # display_state(
